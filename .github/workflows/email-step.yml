@@ -1,0 +1,16 @@
+name: Email Step Action
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: 21f1003422@ds.study.iitm.ac.in
+        run: echo "Hello, world!"
