@@ -1,0 +1,2 @@
+This is a test file inside the /data directory.
+It should be readable via the /read endpoint.

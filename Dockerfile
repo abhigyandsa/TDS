@@ -1,12 +1,17 @@
-FROM python:3.11-slim-buster  # Use a slim Python 3.11 base image
+FROM python:3.11-slim-buster
 
-WORKDIR /app  # Set the working directory inside the container
+WORKDIR /app
 
-COPY requirements.txt requirements.txt # Copy requirements file
-RUN pip install -r requirements.txt   # Install Python dependencies
+RUN mkdir /data  
+COPY data /data
 
-COPY . .  # Copy the rest of the application code
+WORKDIR /app
 
-EXPOSE 8000  # Expose port 8000
+COPY requirements.txt requirements.txt
+RUN pip install -r requirements.txt
 
-CMD ["python", "app.py"] # Command to run the Flask application
+COPY . .
+
+EXPOSE 8000
+
+CMD ["python", "app.py"]
