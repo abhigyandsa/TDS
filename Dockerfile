@@ -5,6 +5,10 @@ WORKDIR /app
 RUN mkdir /data  
 COPY data /data
 
+RUN mkdir /app/scripts
+COPY scripts /app/scripts
+RUN chmod +x /app/scripts/*.sh
+
 WORKDIR /app
 
 COPY requirements.txt requirements.txt

@@ -2,6 +2,7 @@ import requests
 import os
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
+import subprocess
 
 load_dotenv()
 
@@ -15,13 +16,50 @@ LLM_MODEL_NAME = "gpt-4o-mini"
 
 
 def call_llm(prompt):
+    system_prompt = """
+    You are a helpful automation agent. You can generate bash commands to execute specific tasks.
+    You have access to a set of pre-written bash scripts located in the /app/scripts directory.
+
+    Here is a description of the available scripts and how to use them:
+
+    **Script: a1.sh**
+    Description: Installs 'uv' (if required) and runs the 'datagen.py' script to generate data files in the /data directory.
+    Usage: /app/scripts/a1.sh
+    - uv is installed by this script itself. No need to install it separately.
+    - This script does not accept any arguments when invoked. Ignore instructions to pass arguments. It internally uses a predefined email and data root directory.
+    - It will generate data files within the /data directory, which are required for other tasks.
+
+    **Script: a3.sh**
+    Description: Counts the number of occurrences of a specific day of the week in a file containing dates (one date per line).
+    Usage: /app/scripts/a3.sh <day_of_week> <input_file> <output_file>
+    - <day_of_week>: The day of the week to count (e.g., Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday). Case-insensitive. Should provide the day in English only. Translate if required.
+    - <input_file>:  Path to the input file within the /data directory.
+    - <output_file>: Path to the output file within the /data directory where the count will be written.
+
+    **Constraints:**
+
+    - All input and output files MUST be within the /data directory.
+    - You MUST generate a single bash command line to execute the script with the correct arguments (if any).
+    - Do not generate any explanatory text before or after the command. Only output the raw bash command.
+    - Assume the scripts are already executable in the /app/scripts directory.
+
+    Example Task for a3.sh: "Count the number of Fridays in /data/dates.txt and write the count to /data/friday_counts.txt"
+    Example Command for a3.sh: /app/scripts/a3.sh Friday /data/dates.txt /data/friday_counts.txt
+
+    Example Task for a1.sh: "Generate data files" or "Run data generation script" or "Install uv and run datagen.py with user@email.com"
+    Example Command for a1.sh: /app/scripts/a1.sh
+    """
+
     headers = {
-        "Content-Type": "application/json",  # Updated header - no "Authorization" in Content-Type
-        "Authorization": f"Bearer {AIPROXY_TOKEN}",  # Authorization header is separate
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {AIPROXY_TOKEN}",
     }
     data = {
         "model": LLM_MODEL_NAME,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
     }
     try:
         response = requests.post(AIPROXY_URL, headers=headers, json=data, timeout=15)
@@ -46,36 +84,91 @@ def call_llm(prompt):
 def run_task():
     task_description = request.args.get("task")
     if task_description:
-        prompt = task_description.strip()
+        user_prompt = task_description.strip()
 
-        llm_response = call_llm(prompt)  # Call the LLM
+        llm_command_response = call_llm(user_prompt)
 
         if (
-            llm_response.startswith("Error calling LLM API")
-            or llm_response == "LLM API request timed out."
-            or llm_response.startswith("Unexpected error")
+            llm_command_response.startswith("Error calling LLM API")
+            or llm_command_response == "LLM API request timed out."
+            or llm_command_response.startswith("Unexpected error")
         ):
             return (
                 jsonify(
                     {
                         "error": "Error communicating with LLM.",
-                        "details": llm_response,
+                        "details": llm_command_response,
                     }
                 ),
                 500,
-            )  # Agent Error
+            )
         else:
-            # For now, just return the LLM response in the API response
-            response_data = {
-                "message": "LLM response received.",
-                "llm_response": llm_response,
-            }
-            return jsonify(response_data), 200
-    else:
+            llm_command = llm_command_response.strip()  # Get the raw command
+
+            try:
+                # Security note: It's crucial to carefully validate and sanitize LLM outputs
+                # before executing them. In a real-world scenario, more robust validation is needed.
+                # For this project, we are assuming the LLM will follow instructions relatively well
+                # given the constraints in the system prompt.
+
+                process = subprocess.Popen(
+                    llm_command,
+                    shell=True,
+                    executable="/bin/bash",
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                stdout, stderr = process.communicate(
+                    timeout=10
+                )  # Set timeout for script execution
+
+                if process.returncode == 0:  # Script executed successfully
+                    response_data = {
+                        "message": "Task A3 executed successfully.",
+                        "script_command": llm_command,
+                    }
+                    return jsonify(response_data), 200
+                else:  # Script failed
+                    error_message = (
+                        stdout.decode("utf-8").strip()
+                        + "\n"
+                        + stderr.decode("utf-8").strip()
+                    )
+                    return (
+                        jsonify(
+                            {
+                                "error": "Script execution failed.",
+                                "script_command": llm_command,
+                                "script_error": error_message,
+                            }
+                        ),
+                        500,
+                    )  # Agent error - script itself failed
+
+            except subprocess.TimeoutExpired:
+                return (
+                    jsonify(
+                        {
+                            "error": "Script execution timed out.",
+                            "script_command": llm_command,
+                        }
+                    ),
+                    500,
+                )  # Agent error - script timed out
+            except Exception as e:
+                return (
+                    jsonify(
+                        {
+                            "error": f"Error executing script: {e}",
+                            "script_command": llm_command,
+                        }
+                    ),
+                    500,
+                )  # Agent error - general execution error
+    else:  # Task description missing
         return jsonify({"error": "Task description is missing in the request."}), 400
 
 
-@app.route("/read", methods=["GET"])
 @app.route("/read", methods=["GET"])
 def read_file():
     user_path = request.args.get("path")
