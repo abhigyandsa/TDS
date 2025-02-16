@@ -2,6 +2,8 @@
 
 # Script to count occurrences of a specific day of the week in a date file
 
+source venv/bin/activate
+
 if [ $# -ne 3 ]; then
   echo "Usage: $0 <day_of_week> <input_file> <output_file>"
   echo "  <day_of_week>: Day to count (e.g., Wednesday, Thursday)"
